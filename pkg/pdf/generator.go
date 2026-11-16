@@ -2,6 +2,9 @@ package pdf
 
 import (
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,34 +45,32 @@ func GeneratePDF(filePaths []string, outputFile string) error {
 	pdf.SetAutoPageBreak(false, 0)
 
 	for _, img := range images {
-		// Get image info to calculate dimensions
-		info := pdf.RegisterImage(img.Path, "")
-		if info == nil {
-			continue // Skip invalid images
+		// Read raw pixel dimensions using Go's image package
+		// to avoid any DPI/scale issues from fpdf's RegisterImage
+		f, err := os.Open(img.Path)
+		if err != nil {
+			continue
 		}
-		
-		imgW := info.Width()
-		imgH := info.Height()
-		
-		// Create a page that EXACTLY matches the image's aspect ratio.
-		// We'll use 210mm as the base width for Portrait and 297mm for Landscape
-		// to keep the physical size reasonable, but the aspect ratio will be perfect.
-		var pageW, pageH float64
-		orientation := "P"
-		
-		if imgW > imgH {
-			orientation = "L"
-			pageW = 297.0
-			pageH = (imgH / imgW) * 297.0
-		} else {
-			orientation = "P"
-			pageW = 210.0
-			pageH = (imgH / imgW) * 210.0
+		cfg, _, err := image.DecodeConfig(f)
+		f.Close()
+		if err != nil {
+			continue
 		}
-		
-		pdf.AddPageFormat(orientation, fpdf.SizeType{Wd: pageW, Ht: pageH})
 
-		// Place image at (0,0) with full page dimensions
+		pixW := float64(cfg.Width)
+		pixH := float64(cfg.Height)
+
+		// Convert pixels to mm at a fixed DPI so pages have reasonable
+		// physical dimensions. The exact DPI doesn't matter because
+		// we size the page and the image identically — the image always
+		// fills the page perfectly with no clipping.
+		const dpi = 150.0
+		pageW := pixW / dpi * 25.4 // pixels → inches → mm
+		pageH := pixH / dpi * 25.4
+
+		pdf.AddPageFormat("P", fpdf.SizeType{Wd: pageW, Ht: pageH})
+
+		// Place image at (0,0) filling the entire page
 		pdf.Image(img.Path, 0, 0, pageW, pageH, false, "", 0, "")
 	}
 
